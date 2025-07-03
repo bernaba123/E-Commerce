@@ -6,7 +6,9 @@ import {
   updateRequestStatus,
   getUserRequests,
   getRequestStats,
-  updateRequestTracking
+  updateRequestTracking,
+  editUserRequest,
+  cancelUserRequest
 } from '../controllers/requestController.js';
 import { protect, authorize } from '../middleware/auth.js';
 import { validateProductRequest } from '../middleware/validation.js';
@@ -20,6 +22,8 @@ router.use(protect);
 router.post('/', validateProductRequest, createRequest);
 router.get('/my-requests', getUserRequests);
 router.get('/:id', getRequest);
+router.put('/:id/edit', editUserRequest);
+router.put('/:id/cancel', cancelUserRequest);
 
 // Admin routes
 router.get('/', authorize('admin'), getRequests);

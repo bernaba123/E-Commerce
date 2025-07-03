@@ -7,7 +7,9 @@ import {
   getUserOrders,
   getOrderStats,
   updateTracking,
-  trackOrderByNumber
+  trackOrderByNumber,
+  editUserOrder,
+  cancelUserOrder
 } from '../controllers/orderController.js';
 import { protect, authorize } from '../middleware/auth.js';
 import { validateOrder } from '../middleware/validation.js';
@@ -24,6 +26,8 @@ router.use(protect);
 router.post('/', validateOrder, createOrder);
 router.get('/my-orders', getUserOrders);
 router.get('/:id', getOrder);
+router.put('/:id/edit', editUserOrder);
+router.put('/:id/cancel', cancelUserOrder);
 
 // Admin routes
 router.get('/', authorize('admin'), getOrders);

@@ -509,3 +509,159 @@ export const getOrderStats = asyncHandler(async (req, res) => {
     }
   });
 });
+
+// Helper function to check if order can be edited/cancelled (within 10 minutes)
+const canEditOrCancel = (createdAt) => {
+  const now = new Date();
+  const createdTime = new Date(createdAt);
+  const timeDiff = now - createdTime;
+  const tenMinutesInMs = 10 * 60 * 1000; // 10 minutes in milliseconds
+  return timeDiff <= tenMinutesInMs;
+};
+
+// @desc    Edit user order (within 10 minutes)
+// @route   PUT /api/orders/:id/edit
+// @access  Private (User can only edit their own orders)
+export const editUserOrder = asyncHandler(async (req, res) => {
+  const { shippingAddress, billingAddress, notes } = req.body;
+
+  const order = await Order.findOne({ 
+    _id: req.params.id, 
+    user: req.user.id 
+  });
+
+  if (!order) {
+    return res.status(404).json({
+      success: false,
+      message: 'Order not found'
+    });
+  }
+
+  // Check if order can be edited (within 10 minutes and status allows editing)
+  if (!canEditOrCancel(order.createdAt)) {
+    return res.status(400).json({
+      success: false,
+      message: 'Orders can only be edited within 10 minutes of placement'
+    });
+  }
+
+  // Only allow editing of pending orders
+  if (order.status !== 'pending') {
+    return res.status(400).json({
+      success: false,
+      message: 'Only pending orders can be edited'
+    });
+  }
+
+  // Update editable fields
+  if (shippingAddress) {
+    order.shippingAddress = { ...order.shippingAddress, ...shippingAddress };
+  }
+  if (billingAddress) {
+    order.billingAddress = { ...order.billingAddress, ...billingAddress };
+  }
+  if (notes !== undefined) {
+    order.notes = notes;
+  }
+
+  await order.save();
+
+  // Add tracking update
+  if (!order.tracking) {
+    order.tracking = { updates: [] };
+  }
+  
+  order.tracking.updates.push({
+    status: order.status,
+    message: 'Order details updated by customer',
+    location: 'Processing Center',
+    timestamp: new Date()
+  });
+
+  await order.save();
+
+  res.json({
+    success: true,
+    message: 'Order updated successfully',
+    data: { order }
+  });
+});
+
+// @desc    Cancel user order (within 10 minutes)
+// @route   PUT /api/orders/:id/cancel
+// @access  Private (User can only cancel their own orders)
+export const cancelUserOrder = asyncHandler(async (req, res) => {
+  const { reason } = req.body;
+
+  const order = await Order.findOne({ 
+    _id: req.params.id, 
+    user: req.user.id 
+  }).populate('items.product', 'name stock');
+
+  if (!order) {
+    return res.status(404).json({
+      success: false,
+      message: 'Order not found'
+    });
+  }
+
+  // Check if order can be cancelled (within 10 minutes and status allows cancellation)
+  if (!canEditOrCancel(order.createdAt)) {
+    return res.status(400).json({
+      success: false,
+      message: 'Orders can only be cancelled within 10 minutes of placement'
+    });
+  }
+
+  // Only allow cancellation of pending or confirmed orders
+  if (!['pending', 'confirmed'].includes(order.status)) {
+    return res.status(400).json({
+      success: false,
+      message: 'This order cannot be cancelled as it is already being processed'
+    });
+  }
+
+  // Restore product stock only for non-admin orders
+  if (req.user.role !== 'admin') {
+    for (const item of order.items) {
+      const product = await Product.findById(item.product._id);
+      if (product) {
+        product.stock += item.quantity;
+        await product.save();
+      }
+    }
+  }
+
+  // Update order status and add cancellation reason
+  order.status = 'cancelled';
+  order.notes = reason ? `Cancelled by customer: ${reason}` : 'Cancelled by customer';
+
+  // Add tracking update
+  if (!order.tracking) {
+    order.tracking = { updates: [] };
+  }
+  
+  order.tracking.updates.push({
+    status: 'cancelled',
+    message: reason ? `Order cancelled by customer: ${reason}` : 'Order cancelled by customer',
+    location: 'Processing Center',
+    timestamp: new Date()
+  });
+
+  await order.save();
+
+  // Emit real-time update
+  emitOrderUpdate(req, order._id, 'orderCancelled', {
+    orderId: order._id,
+    orderNumber: order.orderNumber,
+    status: 'cancelled',
+    message: 'Order cancelled by customer',
+    timestamp: new Date().toISOString()
+  });
+
+  res.json({
+    success: true,
+    message: 'Order cancelled successfully',
+    data: { order }
+  });
+});

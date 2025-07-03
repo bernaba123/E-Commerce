@@ -341,3 +341,176 @@ export const getRequestStats = asyncHandler(async (req, res) => {
     }
   });
 });
+
+// Helper function to check if request can be edited/cancelled (within 10 minutes)
+const canEditOrCancel = (createdAt) => {
+  const now = new Date();
+  const createdTime = new Date(createdAt);
+  const timeDiff = now - createdTime;
+  const tenMinutesInMs = 10 * 60 * 1000; // 10 minutes in milliseconds
+  return timeDiff <= tenMinutesInMs;
+};
+
+// @desc    Edit user request (within 10 minutes)
+// @route   PUT /api/requests/:id/edit
+// @access  Private (User can only edit their own requests)
+export const editUserRequest = asyncHandler(async (req, res) => {
+  const { 
+    productUrl, 
+    productName, 
+    productPrice, 
+    quantity, 
+    description, 
+    category, 
+    urgency, 
+    shippingAddress,
+    userNotes
+  } = req.body;
+
+  const request = await Request.findOne({ 
+    _id: req.params.id, 
+    user: req.user.id 
+  });
+
+  if (!request) {
+    return res.status(404).json({
+      success: false,
+      message: 'Request not found'
+    });
+  }
+
+  // Check if request can be edited (within 10 minutes and status allows editing)
+  if (!canEditOrCancel(request.createdAt)) {
+    return res.status(400).json({
+      success: false,
+      message: 'Requests can only be edited within 10 minutes of creation'
+    });
+  }
+
+  // Only allow editing of pending requests
+  if (request.status !== 'pending') {
+    return res.status(400).json({
+      success: false,
+      message: 'Only pending requests can be edited'
+    });
+  }
+
+  // Update editable fields
+  if (productUrl) request.productUrl = productUrl;
+  if (productName) request.productName = productName;
+  if (productPrice) {
+    request.productPrice = productPrice;
+    // Recalculate estimated price and fees
+    const basePrice = parseFloat(productPrice.replace(/[^0-9.]/g, '')) || 0;
+    const serviceFee = basePrice * 0.15; // 15% service fee
+    
+    // Variable shipping cost based on delivery urgency
+    let shippingCost = 20; // Default/low urgency
+    if ((urgency || request.urgency) === 'medium') {
+      shippingCost = 35; // Express delivery
+    } else if ((urgency || request.urgency) === 'high') {
+      shippingCost = 55; // Priority delivery
+    }
+
+    request.estimatedPrice = basePrice;
+    request.serviceFee = serviceFee;
+    request.shippingCost = shippingCost;
+  }
+  if (quantity) request.quantity = quantity;
+  if (description !== undefined) request.description = description;
+  if (category) request.category = category;
+  if (urgency) {
+    request.urgency = urgency;
+    // Recalculate shipping cost based on new urgency
+    let shippingCost = 20; // Default/low urgency
+    if (urgency === 'medium') {
+      shippingCost = 35; // Express delivery
+    } else if (urgency === 'high') {
+      shippingCost = 55; // Priority delivery
+    }
+    request.shippingCost = shippingCost;
+  }
+  if (shippingAddress) {
+    request.shippingAddress = { ...request.shippingAddress, ...shippingAddress };
+  }
+  if (userNotes !== undefined) request.userNotes = userNotes;
+
+  await request.save();
+
+  // Add tracking update
+  if (!request.tracking) {
+    request.tracking = { updates: [] };
+  }
+  
+  request.tracking.updates.push({
+    status: request.status,
+    message: 'Request details updated by customer',
+    timestamp: new Date()
+  });
+
+  await request.save();
+
+  res.json({
+    success: true,
+    message: 'Request updated successfully',
+    data: { request }
+  });
+});
+
+// @desc    Cancel user request (within 10 minutes)
+// @route   PUT /api/requests/:id/cancel
+// @access  Private (User can only cancel their own requests)
+export const cancelUserRequest = asyncHandler(async (req, res) => {
+  const { reason } = req.body;
+
+  const request = await Request.findOne({ 
+    _id: req.params.id, 
+    user: req.user.id 
+  });
+
+  if (!request) {
+    return res.status(404).json({
+      success: false,
+      message: 'Request not found'
+    });
+  }
+
+  // Check if request can be cancelled (within 10 minutes and status allows cancellation)
+  if (!canEditOrCancel(request.createdAt)) {
+    return res.status(400).json({
+      success: false,
+      message: 'Requests can only be cancelled within 10 minutes of creation'
+    });
+  }
+
+  // Only allow cancellation of pending or reviewing requests
+  if (!['pending', 'reviewing'].includes(request.status)) {
+    return res.status(400).json({
+      success: false,
+      message: 'This request cannot be cancelled as it is already being processed'
+    });
+  }
+
+  // Update request status and add cancellation reason
+  request.status = 'cancelled';
+  request.userNotes = reason ? `Cancelled by customer: ${reason}` : 'Cancelled by customer';
+
+  // Add tracking update
+  if (!request.tracking) {
+    request.tracking = { updates: [] };
+  }
+  
+  request.tracking.updates.push({
+    status: 'cancelled',
+    message: reason ? `Request cancelled by customer: ${reason}` : 'Request cancelled by customer',
+    timestamp: new Date()
+  });
+
+  await request.save();
+
+  res.json({
+    success: true,
+    message: 'Request cancelled successfully',
+    data: { request }
+  });
+});

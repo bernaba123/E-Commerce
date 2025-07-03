@@ -19,7 +19,8 @@ import {
   Camera,
   Lock,
   Save,
-  X
+  X,
+  XCircle
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useUserOrders, useUserRequests } from '../../hooks/useApi';
@@ -30,6 +31,8 @@ import ProfileEditModal from '../../components/common/ProfileEditModal';
 import NotificationPreferencesModal from '../../components/common/NotificationPreferencesModal';
 import PrivacySettingsModal from '../../components/common/PrivacySettingsModal';
 import InvoiceModal from '../../components/common/InvoiceModal';
+import OrderEditModal from '../../components/common/OrderEditModal';
+import RequestEditModal from '../../components/common/RequestEditModal';
 
 const UserDashboard = () => {
   const [activeTab, setActiveTab] = useState('overview');
@@ -43,6 +46,8 @@ const UserDashboard = () => {
   const [showNotificationModal, setShowNotificationModal] = useState(false);
   const [showPrivacyModal, setShowPrivacyModal] = useState(false);
   const [showInvoiceModal, setShowInvoiceModal] = useState(false);
+  const [showOrderEditModal, setShowOrderEditModal] = useState(false);
+  const [showRequestEditModal, setShowRequestEditModal] = useState(false);
   const [passwordData, setPasswordData] = useState({
     currentPassword: '',
     newPassword: '',
@@ -50,11 +55,20 @@ const UserDashboard = () => {
   });
 
   // API calls
-  const { data: ordersData, loading: ordersLoading } = useUserOrders({ limit: 10 });
-  const { data: requestsData, loading: requestsLoading } = useUserRequests({ limit: 10 });
+  const { data: ordersData, loading: ordersLoading, refetch: refetchOrders } = useUserOrders({ limit: 10 });
+  const { data: requestsData, loading: requestsLoading, refetch: refetchRequests } = useUserRequests({ limit: 10 });
 
   const orders = ordersData?.data?.orders || [];
   const requests = requestsData?.data?.requests || [];
+
+  // Helper function to check if item can be edited/cancelled (within 10 minutes)
+  const canEditOrCancel = (createdAt) => {
+    const now = new Date();
+    const createdTime = new Date(createdAt);
+    const timeDiff = now - createdTime;
+    const tenMinutesInMs = 10 * 60 * 1000; // 10 minutes in milliseconds
+    return timeDiff <= tenMinutesInMs;
+  };
 
   // Calculate stats
   const stats = [
@@ -124,9 +138,80 @@ const UserDashboard = () => {
     setShowOrderModal(true);
   };
 
+  const handleEditOrder = (order) => {
+    setSelectedOrder(order);
+    setShowOrderEditModal(true);
+  };
+
+  const handleCancelOrder = async (order) => {
+    if (!window.confirm('Are you sure you want to cancel this order?')) {
+      return;
+    }
+
+    try {
+      const reason = prompt('Please provide a reason for cancellation (optional):') || '';
+      await apiService.cancelUserOrder(order._id, reason);
+      await refetchOrders();
+      alert('Order cancelled successfully');
+    } catch (error) {
+      console.error('Failed to cancel order:', error);
+      alert(error.message || 'Failed to cancel order. Please try again.');
+    }
+  };
+
+  const handleSaveOrderEdit = async (orderId, orderData) => {
+    try {
+      await apiService.editUserOrder(orderId, orderData);
+      await refetchOrders();
+      alert('Order updated successfully');
+    } catch (error) {
+      console.error('Failed to update order:', error);
+      alert(error.message || 'Failed to update order. Please try again.');
+      throw error;
+    }
+  };
+
   const handleViewInvoice = (order) => {
     setSelectedOrder(order);
     setShowInvoiceModal(true);
+  };
+
+  const handleViewRequest = (request) => {
+    setSelectedRequest(request);
+    setShowRequestModal(true);
+  };
+
+  const handleEditRequest = (request) => {
+    setSelectedRequest(request);
+    setShowRequestEditModal(true);
+  };
+
+  const handleCancelRequest = async (request) => {
+    if (!window.confirm('Are you sure you want to cancel this request?')) {
+      return;
+    }
+
+    try {
+      const reason = prompt('Please provide a reason for cancellation (optional):') || '';
+      await apiService.cancelUserRequest(request._id, reason);
+      await refetchRequests();
+      alert('Request cancelled successfully');
+    } catch (error) {
+      console.error('Failed to cancel request:', error);
+      alert(error.message || 'Failed to cancel request. Please try again.');
+    }
+  };
+
+  const handleSaveRequestEdit = async (requestId, requestData) => {
+    try {
+      await apiService.editUserRequest(requestId, requestData);
+      await refetchRequests();
+      alert('Request updated successfully');
+    } catch (error) {
+      console.error('Failed to update request:', error);
+      alert(error.message || 'Failed to update request. Please try again.');
+      throw error;
+    }
   };
 
   const handleProfileEdit = () => {
@@ -181,11 +266,6 @@ const UserDashboard = () => {
       console.error('Failed to change password:', error);
       alert('Failed to change password. Please check your current password.');
     }
-  };
-
-  const handleViewRequest = (request) => {
-    setSelectedRequest(request);
-    setShowRequestModal(true);
   };
 
   const handleNotificationPreferences = () => {
@@ -420,7 +500,7 @@ const UserDashboard = () => {
                           </div>
                           <div className="text-right">
                             <p className="text-lg font-bold text-neutral-900">€{order.finalAmount}</p>
-                            <div className="flex items-center space-x-2 mt-2">
+                            <div className="flex items-center space-x-2 mt-2 flex-wrap">
                               <button 
                                 onClick={() => handleViewOrder(order)}
                                 className="text-primary-600 hover:text-primary-700 text-sm font-medium"
@@ -436,6 +516,24 @@ const UserDashboard = () => {
                                   <Download className="w-4 h-4 inline mr-1" />
                                   Invoice
                                 </button>
+                              )}
+                              {canEditOrCancel(order.createdAt) && order.status === 'pending' && (
+                                <>
+                                  <button 
+                                    onClick={() => handleEditOrder(order)}
+                                    className="text-warning-600 hover:text-warning-700 text-sm font-medium"
+                                  >
+                                    <Edit className="w-4 h-4 inline mr-1" />
+                                    Edit
+                                  </button>
+                                  <button 
+                                    onClick={() => handleCancelOrder(order)}
+                                    className="text-error-600 hover:text-error-700 text-sm font-medium"
+                                  >
+                                    <XCircle className="w-4 h-4 inline mr-1" />
+                                    Cancel
+                                  </button>
+                                </>
                               )}
                             </div>
                           </div>
@@ -501,13 +599,33 @@ const UserDashboard = () => {
                             <p className="text-lg font-bold text-neutral-900">
                               €{request.totalCost || request.estimatedPrice}
                             </p>
-                            <button 
-                              onClick={() => handleViewRequest(request)}
-                              className="text-primary-600 hover:text-primary-700 text-sm font-medium mt-2"
-                            >
-                              <Eye className="w-4 h-4 inline mr-1" />
-                              View Details
-                            </button>
+                            <div className="flex items-center space-x-2 mt-2 flex-wrap justify-end">
+                              <button 
+                                onClick={() => handleViewRequest(request)}
+                                className="text-primary-600 hover:text-primary-700 text-sm font-medium"
+                              >
+                                <Eye className="w-4 h-4 inline mr-1" />
+                                View Details
+                              </button>
+                              {canEditOrCancel(request.createdAt) && request.status === 'pending' && (
+                                <>
+                                  <button 
+                                    onClick={() => handleEditRequest(request)}
+                                    className="text-warning-600 hover:text-warning-700 text-sm font-medium"
+                                  >
+                                    <Edit className="w-4 h-4 inline mr-1" />
+                                    Edit
+                                  </button>
+                                  <button 
+                                    onClick={() => handleCancelRequest(request)}
+                                    className="text-error-600 hover:text-error-700 text-sm font-medium"
+                                  >
+                                    <XCircle className="w-4 h-4 inline mr-1" />
+                                    Cancel
+                                  </button>
+                                </>
+                              )}
+                            </div>
                           </div>
                         </div>
                       </div>
@@ -743,6 +861,26 @@ const UserDashboard = () => {
             setShowInvoiceModal(false);
             setSelectedOrder(null);
           }}
+        />
+
+        <OrderEditModal
+          order={selectedOrder}
+          isOpen={showOrderEditModal}
+          onClose={() => {
+            setShowOrderEditModal(false);
+            setSelectedOrder(null);
+          }}
+          onSave={handleSaveOrderEdit}
+        />
+
+        <RequestEditModal
+          request={selectedRequest}
+          isOpen={showRequestEditModal}
+          onClose={() => {
+            setShowRequestEditModal(false);
+            setSelectedRequest(null);
+          }}
+          onSave={handleSaveRequestEdit}
         />
       </div>
     </div>

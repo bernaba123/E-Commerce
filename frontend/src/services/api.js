@@ -361,6 +361,21 @@ class ApiService {
     });
   }
 
+  // New methods for user order editing and canceling
+  async editUserOrder(id, orderData) {
+    return this.request(`/orders/${id}/edit`, {
+      method: 'PUT',
+      body: JSON.stringify(orderData)
+    });
+  }
+
+  async cancelUserOrder(id, reason = '') {
+    return this.request(`/orders/${id}/cancel`, {
+      method: 'PUT',
+      body: JSON.stringify({ reason })
+    });
+  }
+
   // Request methods
   async getRequests(params = {}) {
     const queryString = new URLSearchParams(params).toString();
@@ -401,17 +416,26 @@ class ApiService {
     return this.request('/requests/admin/stats');
   }
 
-  // Update and delete product request methods
-  async updateProductRequest(id, requestData) {
-    return this.request(`/requests/${id}`, {
+  // New methods for user request editing and canceling
+  async editUserRequest(id, requestData) {
+    return this.request(`/requests/${id}/edit`, {
       method: 'PUT',
       body: JSON.stringify(requestData)
     });
   }
 
-  async deleteProductRequest(id) {
+  async cancelUserRequest(id, reason = '') {
+    return this.request(`/requests/${id}/cancel`, {
+      method: 'PUT',
+      body: JSON.stringify({ reason })
+    });
+  }
+
+  // Update and delete product request methods
+  async updateProductRequest(id, requestData) {
     return this.request(`/requests/${id}`, {
-      method: 'DELETE'
+      method: 'PUT',
+      body: JSON.stringify(requestData)
     });
   }
 
